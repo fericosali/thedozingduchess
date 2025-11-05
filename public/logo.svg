@@ -1,0 +1,57 @@
+<svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="circleGradient" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#E8B4CB;stop-opacity:0.8"/>
+      <stop offset="100%" style="stop-color:#D4A5B8;stop-opacity:1"/>
+    </radialGradient>
+    <linearGradient id="hairGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#E8B4CB"/>
+      <stop offset="50%" style="stop-color:#D4A5B8"/>
+      <stop offset="100%" style="stop-color:#C296A9"/>
+    </linearGradient>
+    <linearGradient id="skinGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#F5D5C8"/>
+      <stop offset="100%" style="stop-color:#E8C4B8"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background Circle -->
+  <circle cx="200" cy="200" r="190" fill="url(#circleGradient)" stroke="#B8869A" stroke-width="3"/>
+  
+  <!-- Hair -->
+  <path d="M120 150 Q100 120 110 100 Q130 80 160 85 Q190 75 220 80 Q250 70 280 85 Q310 95 320 120 Q325 140 315 160 Q300 180 280 190 Q260 200 240 210 Q220 220 200 230 Q180 240 160 250 Q140 260 125 270 Q110 280 105 300 Q100 320 110 340 Q120 360 140 370 Q160 375 180 370 Q200 365 220 360 Q240 355 260 350 Q280 345 300 340 Q320 335 335 325 Q350 315 360 300 Q370 285 375 270 Q380 255 375 240 Q370 225 360 210 Q350 195 335 185 Q320 175 300 170 Q280 165 260 165 Q240 165 220 170 Q200 175 180 185 Q160 195 145 210 Q130 225 125 240 Q120 255 125 270" fill="url(#hairGradient)"/>
+  
+  <!-- Face -->
+  <ellipse cx="200" cy="180" rx="45" ry="55" fill="url(#skinGradient)"/>
+  
+  <!-- Eyes -->
+  <ellipse cx="185" cy="170" rx="4" ry="6" fill="#2C1810"/>
+  <ellipse cx="215" cy="170" rx="4" ry="6" fill="#2C1810"/>
+  
+  <!-- Eyebrows -->
+  <path d="M178 162 Q185 160 192 162" stroke="#8B4513" stroke-width="2" fill="none"/>
+  <path d="M208 162 Q215 160 222 162" stroke="#8B4513" stroke-width="2" fill="none"/>
+  
+  <!-- Nose -->
+  <path d="M200 175 Q202 180 200 185" stroke="#D4A5B8" stroke-width="1.5" fill="none"/>
+  
+  <!-- Lips -->
+  <path d="M195 195 Q200 200 205 195" stroke="#C296A9" stroke-width="2" fill="none"/>
+  
+  <!-- Crown/Tiara -->
+  <path d="M170 140 Q180 130 200 135 Q220 130 230 140 Q225 145 220 150 Q210 155 200 155 Q190 155 180 150 Q175 145 170 140" fill="#FFD700" stroke="#DAA520" stroke-width="1"/>
+  
+  <!-- Crown details -->
+  <circle cx="185" cy="145" r="3" fill="#FF69B4"/>
+  <circle cx="200" cy="142" r="4" fill="#FF1493"/>
+  <circle cx="215" cy="145" r="3" fill="#FF69B4"/>
+  
+  <!-- Text "THE" -->
+  <text x="200" y="280" font-family="serif" font-size="32" font-weight="bold" text-anchor="middle" fill="#2C1810">THE</text>
+  
+  <!-- Text "DOZING" -->
+  <text x="200" y="315" font-family="serif" font-size="28" font-weight="bold" text-anchor="middle" fill="#2C1810">DOZING</text>
+  
+  <!-- Text "Duchess" -->
+  <text x="200" y="350" font-family="serif" font-size="24" font-style="italic" text-anchor="middle" fill="#DAA520">Duchess</text>
+</svg>
