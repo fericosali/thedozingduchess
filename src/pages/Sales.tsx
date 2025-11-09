@@ -48,7 +48,7 @@ import {
 } from '@mui/icons-material';
 import { Plus, Trash2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { logSaleTransaction, logCostOfGoodsSold } from '../lib/financialJournal';
+import { logSaleTransaction } from '../lib/financialJournal';
 import { formatPrice, formatNumber, formatQuantity } from '../lib/utils';
 
 interface Sale {
@@ -112,6 +112,9 @@ const Sales: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saleDialogOpen, setSaleDialogOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
+  // View invoice dialog state
+  const [openViewDialog, setOpenViewDialog] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   
   // Invoice form state
   const [newInvoice, setNewInvoice] = useState<NewInvoice>({
@@ -143,34 +146,38 @@ const Sales: React.FC = () => {
 
   const fetchSales = async () => {
     try {
+      // Use invoice_details view (introduced in migration 003/010)
       const { data, error } = await supabase
-        .from('sales')
-        .select(`
-          *,
-          product_variants!inner(
-            variant,
-            size,
-            sku,
-            color,
-            products!inner(name)
-          )
-        `)
-        .order('created_at', { ascending: false });
+        .from('invoice_details')
+        .select('*')
+        .order('sale_date', { ascending: false });
 
       if (error) throw error;
-      
-      const formattedSales = data?.map(sale => ({
-        ...sale,
-        product_name: (sale.product_variants as any).products.name,
-        variant: (sale.product_variants as any).variant,
-        size: (sale.product_variants as any).size,
-        sku: (sale.product_variants as any).sku,
-        color: (sale.product_variants as any).color
-      })) || [];
-      
+
+      // Map view rows to existing Sale interface shape
+      const formattedSales: Sale[] = (data || []).map((row: any) => ({
+        id: row.item_id,
+        variant_id: row.variant_id,
+        marketplace: row.marketplace,
+        invoice_number: row.invoice_number,
+        quantity: row.quantity,
+        selling_price: row.proportional_revenue, // per-item revenue
+        total_revenue: row.proportional_revenue,
+        // Treat COGS as zero for profit reporting
+        cogs_used: 0,
+        // Profit equals revenue (purchases tracked as expenses separately)
+        profit: row.proportional_revenue,
+        sale_date: row.sale_date,
+        created_at: row.created_at ?? row.sale_date, // view doesn’t expose created_at
+        product_name: row.product_name,
+        variant: row.variant,
+        size: row.size,
+        sku: row.sku,
+      }));
+
       setSales(formattedSales);
-      
-      // Group sales by invoice for invoice view
+
+      // Group by invoice_number + marketplace
       const invoiceMap = new Map<string, Invoice>();
       formattedSales.forEach(sale => {
         const key = `${sale.invoice_number}-${sale.marketplace}`;
@@ -190,10 +197,11 @@ const Sales: React.FC = () => {
         const invoice = invoiceMap.get(key)!;
         invoice.items.push(sale);
         invoice.total_amount += sale.total_revenue;
-        invoice.total_profit += sale.profit;
-        invoice.total_cogs += sale.cogs_used;
+        // Profit equals revenue; COGS ignored
+        invoice.total_profit += sale.total_revenue;
+        invoice.total_cogs += 0;
       });
-      
+
       setInvoices(Array.from(invoiceMap.values()));
     } catch (err) {
       setError('Failed to fetch sales data');
@@ -219,14 +227,20 @@ const Sales: React.FC = () => {
 
       if (error) throw error;
       
-      const formattedVariants = data?.map(v => ({
-        id: v.id,
-        product_name: (v.products as any).name,
-        variant: v.variant,
-        size: v.size,
-        sku: v.sku,
-        available_quantity: v.inventory?.[0]?.total_quantity || 0
-      })) || [];
+      const formattedVariants = data?.map(v => {
+        const inv = (v as any).inventory;
+        const qty = Array.isArray(inv)
+          ? inv?.[0]?.total_quantity ?? 0
+          : inv?.total_quantity ?? 0;
+        return {
+          id: v.id,
+          product_name: (v.products as any).name,
+          variant: v.variant,
+          size: v.size,
+          sku: v.sku,
+          available_quantity: qty
+        };
+      }) || [];
       
       setVariants(formattedVariants);
     } catch (err) {
@@ -294,51 +308,51 @@ const Sales: React.FC = () => {
       // Calculate total quantity for profit distribution
       const totalQuantity = invoiceItems.reduce((sum, item) => sum + item.quantity, 0);
       
-      // Create sales records for each item
-      const salesData = invoiceItems.map(item => {
-        // Distribute total amount proportionally based on quantity
-        const itemRevenue = (item.quantity / totalQuantity) * newInvoice.total_amount;
-        const unitPrice = itemRevenue / item.quantity;
-        
-        return {
-          variant_id: item.variant_id,
-          marketplace: newInvoice.marketplace,
+      // Create invoice header
+      const { data: invoiceRows, error: invError } = await supabase
+        .from('invoices')
+        .insert({
           invoice_number: newInvoice.invoice_number,
-          quantity: item.quantity,
-          selling_price: unitPrice,
+          marketplace: newInvoice.marketplace,
+          total_selling_price: newInvoice.total_amount,
           sale_date: newInvoice.sale_date
+        })
+        .select();
+
+      if (invError) throw invError;
+
+      const invoiceId = Array.isArray(invoiceRows) ? invoiceRows[0]?.id : (invoiceRows as any)?.id;
+      if (!invoiceId) throw new Error('Failed to create invoice');
+
+      // Create invoice items with proportional revenue
+      const itemsData = invoiceItems.map(item => {
+        const itemRevenue = (item.quantity / totalQuantity) * newInvoice.total_amount;
+        return {
+          invoice_id: invoiceId,
+          variant_id: item.variant_id,
+          quantity: item.quantity,
+          proportional_revenue: itemRevenue
         };
       });
 
-      const { data: insertedSales, error } = await supabase
-        .from('sales')
-        .insert(salesData)
+      const { data: insertedItems, error: itemsError } = await supabase
+        .from('invoice_items')
+        .insert(itemsData)
         .select();
-
-      if (error) throw error;
+      if (itemsError) throw itemsError;
 
       // Log the sale transaction to financial journal
       try {
-        // Log revenue (credit)
+        // Log revenue (credit) against invoices table
         await logSaleTransaction(
-          newInvoice.invoice_number, // Use invoice number as reference
+          invoiceId,
           newInvoice.marketplace,
           newInvoice.total_amount,
-          'IDR'
+          'IDR',
+          'invoices'
         );
 
-        // For each sale, log cost of goods sold (debit)
-        if (insertedSales) {
-          for (const sale of insertedSales) {
-            if (sale.cogs_used > 0) {
-              await logCostOfGoodsSold(
-                sale.id,
-                sale.cogs_used,
-                'IDR'
-              );
-            }
-          }
-        }
+        // Skip COGS logging; purchases are recorded as expenses
       } catch (logError) {
         console.warn('Failed to log sale transaction:', logError);
         // Don't throw error for logging failure, just warn
@@ -407,9 +421,26 @@ const Sales: React.FC = () => {
   };
 
   const totalRevenue = sales.reduce((sum, sale) => sum + sale.total_revenue, 0);
-  const totalProfit = sales.reduce((sum, sale) => sum + sale.profit, 0);
-  const totalCOGS = sales.reduce((sum, sale) => sum + sale.cogs_used, 0);
-  const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+  // Profit equals revenue; ignore COGS
+  const totalProfit = totalRevenue;
+  const totalCOGS = 0;
+  const totalInvoices = invoices.length;
+  const averageOrderValue = totalInvoices > 0 ? totalRevenue / totalInvoices : 0;
+  const marketplaceCounts = invoices.reduce((acc: Record<string, number>, inv) => {
+    acc[inv.marketplace] = (acc[inv.marketplace] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  const topMarketplaceName = Object.entries(marketplaceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+
+  const openInvoiceDialog = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    setOpenViewDialog(true);
+  };
+
+  const closeInvoiceDialog = () => {
+    setOpenViewDialog(false);
+    setSelectedInvoice(null);
+  };
 
   if (loading) {
     return (
@@ -457,7 +488,7 @@ const Sales: React.FC = () => {
                     Total Invoices
                   </Typography>
                   <Typography variant="h5">
-                    {formatNumber(invoices.length)}
+                    {formatNumber(totalInvoices)}
                   </Typography>
                 </Box>
                 <ReceiptIcon color="primary" sx={{ fontSize: 40 }} />
@@ -488,13 +519,13 @@ const Sales: React.FC = () => {
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography color="textSecondary" gutterBottom>
-                    Total Profit
+                    Avg Order Value
                   </Typography>
-                  <Typography variant="h5" color={totalProfit >= 0 ? "success.main" : "error.main"}>
-                    {formatPrice(totalProfit)}
+                  <Typography variant="h5" color="primary.main">
+                    {formatPrice(averageOrderValue)}
                   </Typography>
                 </Box>
-                <TrendingUpIcon color={totalProfit >= 0 ? "success" : "error"} sx={{ fontSize: 40 }} />
+                <TrendingUpIcon color="primary" sx={{ fontSize: 40 }} />
               </Box>
             </CardContent>
           </Card>
@@ -505,13 +536,13 @@ const Sales: React.FC = () => {
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography color="textSecondary" gutterBottom>
-                    Profit Margin
+                    Top Marketplace
                   </Typography>
-                  <Typography variant="h5" color={profitMargin >= 0 ? "success.main" : "error.main"}>
-                    {profitMargin.toFixed(1)}%
+                  <Typography variant="h6">
+                    {topMarketplaceName || '—'}
                   </Typography>
                 </Box>
-                <TrendingUpIcon color={profitMargin >= 0 ? "success" : "error"} sx={{ fontSize: 40 }} />
+                <SalesIcon color="info" sx={{ fontSize: 40 }} />
               </Box>
             </CardContent>
           </Card>
@@ -529,8 +560,7 @@ const Sales: React.FC = () => {
                 <TableCell>Marketplace</TableCell>
                 <TableCell align="right">Items</TableCell>
                 <TableCell align="right">Total Amount</TableCell>
-                <TableCell align="right">Total COGS</TableCell>
-                <TableCell align="right">Total Profit</TableCell>
+                {/* Removed profit column to avoid redundancy */}
                 <TableCell align="center">Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -562,23 +592,10 @@ const Sales: React.FC = () => {
                       {formatPrice(invoice.total_amount)}
                     </Typography>
                   </TableCell>
-                  <TableCell align="right">
-                    <Typography variant="body2" color="warning.main">
-                      {formatPrice(invoice.total_cogs)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="right">
-                    <Typography 
-                      variant="body2" 
-                      fontWeight="medium"
-                      color={invoice.total_profit >= 0 ? "success.main" : "error.main"}
-                    >
-                      {formatPrice(invoice.total_profit)}
-                    </Typography>
-                  </TableCell>
+                  {/* Removed profit value cell */}
                   <TableCell align="center">
                     <Tooltip title="View details">
-                      <IconButton size="small">
+                      <IconButton size="small" onClick={() => openInvoiceDialog(invoice)}>
                         <ViewIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
@@ -589,6 +606,64 @@ const Sales: React.FC = () => {
           </Table>
         </TableContainer>
       </Paper>
+
+      {/* View Invoice Dialog */}
+      <Dialog open={openViewDialog} onClose={closeInvoiceDialog} maxWidth="md" fullWidth>
+        <DialogTitle>
+          Invoice Details{selectedInvoice ? ` - ${selectedInvoice.invoice_number}` : ''}
+        </DialogTitle>
+        <DialogContent>
+          {selectedInvoice && (
+            <Box sx={{ mt: 1 }}>
+              <Grid container spacing={2} sx={{ mb: 2 }}>
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="body2" color="text.secondary">Marketplace</Typography>
+                  <Chip
+                    label={selectedInvoice.marketplace}
+                    color={getMarketplaceColor(selectedInvoice.marketplace)}
+                    size="small"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="body2" color="text.secondary">Invoice Date</Typography>
+                  <Typography variant="body1">
+                    {new Date(selectedInvoice.sale_date).toLocaleDateString()}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="body2" color="text.secondary">Total Amount</Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 'bold', color: 'success.main' }}>
+                    {formatPrice(selectedInvoice.total_amount)}
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <Typography variant="body2" color="text.secondary">Items</Typography>
+                  <Typography variant="body1">
+                    {formatNumber(selectedInvoice.items.length)} items
+                  </Typography>
+                </Grid>
+              </Grid>
+
+              <Divider sx={{ my: 2 }} />
+
+              <Typography variant="subtitle1" sx={{ mb: 1 }}>Invoice Items</Typography>
+              <List>
+                {selectedInvoice.items.map((item, idx) => (
+                  <ListItem key={`${item.sku}-${idx}`} divider>
+                    <ListItemText
+                      primary={`${item.product_name} — ${item.variant} (${item.size})`}
+                      secondary={`SKU: ${item.sku} | Qty: ${formatQuantity(item.quantity)} | Revenue: ${formatPrice(item.total_revenue)}`}
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeInvoiceDialog}>Close</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Create Invoice Dialog */}
       <Dialog open={saleDialogOpen} onClose={() => setSaleDialogOpen(false)} maxWidth="md" fullWidth>
@@ -606,14 +681,21 @@ const Sales: React.FC = () => {
             {activeStep === 0 && (
               <Grid container spacing={2}>
                 <Grid item xs={12} sm={6}>
-                  <TextField
-                    label="Marketplace"
-                    value={newInvoice.marketplace}
-                    onChange={(e) => setNewInvoice(prev => ({ ...prev, marketplace: e.target.value }))}
-                    fullWidth
-                    required
-                    placeholder="e.g., Amazon, eBay, Shopify"
-                  />
+                  <FormControl fullWidth required>
+                    <InputLabel id="marketplace-label">Marketplace</InputLabel>
+                    <Select
+                      labelId="marketplace-label"
+                      label="Marketplace"
+                      value={newInvoice.marketplace}
+                      onChange={(e) => setNewInvoice(prev => ({ ...prev, marketplace: String(e.target.value) }))}
+                    >
+                      <MenuItem value="Shopee">Shopee</MenuItem>
+                      <MenuItem value="TikTok">TikTok</MenuItem>
+                      <MenuItem value="Tokopedia">Tokopedia</MenuItem>
+                      <MenuItem value="Lazada">Lazada</MenuItem>
+                      <MenuItem value="Manual">Manual</MenuItem>
+                    </Select>
+                  </FormControl>
                 </Grid>
                 <Grid item xs={12} sm={6}>
                   <TextField
@@ -658,7 +740,7 @@ const Sales: React.FC = () => {
                 <Grid container spacing={2} alignItems="center" sx={{ mb: 3 }}>
                   <Grid item xs={12} sm={6}>
                     <Autocomplete
-                      options={variants.filter(v => v.available_quantity > 0)}
+                      options={variants}
                       getOptionLabel={(option) => `${option.product_name} - ${option.variant} - ${option.size} (${option.sku}) - Stock: ${option.available_quantity}`}
                       value={variants.find(v => v.id === currentItem.variant_id) || null}
                       onChange={(_, value) => {

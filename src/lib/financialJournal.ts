@@ -82,16 +82,17 @@ export async function logLogisticsFee(
  * Log a sale transaction (Debit: Cash, Credit: Revenue)
  */
 export async function logSaleTransaction(
-  saleId: string,
+  referenceId: string,
   customerName: string,
   amount: number,
-  currency: string = 'IDR'
+  currency: string = 'IDR',
+  referenceTable: 'sales' | 'invoices' = 'sales'
 ) {
   return await createJournalEntry({
     transaction_type: 'sale',
     description: `Sale to ${customerName}`,
-    reference_id: saleId,
-    reference_table: 'sales',
+    reference_id: referenceId,
+    reference_table: referenceTable,
     credit_amount: amount, // Increase revenue
     account_type: 'revenue',
     account_subtype: 'product_sale',
@@ -103,15 +104,16 @@ export async function logSaleTransaction(
  * Log cost of goods sold (Debit: Expense, Credit: Inventory)
  */
 export async function logCostOfGoodsSold(
-  saleId: string,
+  referenceId: string,
   amount: number,
-  currency: string = 'IDR'
+  currency: string = 'IDR',
+  referenceTable: 'sales' | 'invoice_items' = 'sales'
 ) {
   return await createJournalEntry({
     transaction_type: 'sale',
     description: `Cost of goods sold`,
-    reference_id: saleId,
-    reference_table: 'sales',
+    reference_id: referenceId,
+    reference_table: referenceTable,
     debit_amount: amount, // Increase expense (COGS)
     account_type: 'expense',
     account_subtype: 'cost_of_goods_sold',
@@ -139,6 +141,52 @@ export async function logExpenseTransaction(
     account_subtype: expenseType,
     currency
   });
+}
+
+/**
+ * Log a balance adjustment. Positive amounts are treated as revenue (credit),
+ * negative amounts are treated as expense (debit).
+ */
+export async function logBalanceAdjustmentTransaction(
+  adjustmentId: string,
+  amount: number,
+  adjustmentType: string,
+  reason: string,
+  currency: string = 'IDR'
+) {
+  // Refunds should reduce expenses, not inflate revenue
+  const isRefund = adjustmentType === 'refund';
+  const isIncome = amount >= 0;
+  const payload = {
+    transaction_type: 'adjustment' as const,
+    description: `Balance adjustment (${adjustmentType}): ${reason}`,
+    reference_id: adjustmentId,
+    reference_table: 'balance_adjustments',
+    debit_amount: 0,
+    credit_amount: 0,
+    account_type: 'expense' as const,
+    account_subtype: adjustmentType,
+    currency
+  };
+
+  if (isRefund) {
+    // Positive refund => credit to expense (reduces expenses)
+    // Negative refund => debit to expense (increases expenses)
+    payload.credit_amount = isIncome ? amount : 0;
+    payload.debit_amount = !isIncome ? Math.abs(amount) : 0;
+    payload.account_type = 'expense';
+  } else {
+    // Other adjustments: positive as revenue credit, negative as expense debit
+    if (isIncome) {
+      payload.account_type = 'revenue';
+      payload.credit_amount = amount;
+    } else {
+      payload.account_type = 'expense';
+      payload.debit_amount = Math.abs(amount);
+    }
+  }
+
+  return await createJournalEntry(payload);
 }
 
 /**

@@ -56,6 +56,9 @@ interface InventoryItem {
   weighted_gap_per_unit: number;
   weighted_logistics_fee_per_unit: number;
   total_remaining_quantity: number;
+  // Display fields derived from weighted costs
+  display_average_cogs: number;
+  display_total_value: number;
 }
 
 const Inventory: React.FC = () => {
@@ -137,7 +140,9 @@ const Inventory: React.FC = () => {
             weighted_exchange_rate: 0,
             weighted_gap_per_unit: 0,
             weighted_logistics_fee_per_unit: 0,
-            total_remaining_quantity: 0
+            total_remaining_quantity: 0,
+            display_average_cogs: item.average_cogs,
+            display_total_value: item.average_cogs * item.total_quantity
           };
         }
 
@@ -156,6 +161,11 @@ const Inventory: React.FC = () => {
         const weightedLogisticsFeePerUnit = activeBatches.reduce((sum: number, batch: any) => 
           sum + (batch.logistics_fee_per_unit * batch.remaining_quantity), 0) / totalRemainingQty;
 
+        // Final unit cost should include base price, gap split, and logistics fee
+        const weightedFinalUnitCost = (weightedCnyPrice * weightedExchangeRate) + weightedGapPerUnit + weightedLogisticsFeePerUnit;
+        const displayAverageCogs = totalRemainingQty > 0 ? weightedFinalUnitCost : item.average_cogs;
+        const displayTotalValue = displayAverageCogs * item.total_quantity;
+
         return {
           ...item,
           product_name: product?.name || 'Unknown Product',
@@ -169,7 +179,9 @@ const Inventory: React.FC = () => {
           weighted_exchange_rate: weightedExchangeRate,
           weighted_gap_per_unit: weightedGapPerUnit,
           weighted_logistics_fee_per_unit: weightedLogisticsFeePerUnit,
-          total_remaining_quantity: totalRemainingQty
+          total_remaining_quantity: totalRemainingQty,
+          display_average_cogs: displayAverageCogs,
+          display_total_value: displayTotalValue
         };
       }) || [];
 
@@ -417,18 +429,18 @@ const Inventory: React.FC = () => {
                               }
                             }}
                           >
-                            {formatPrice(item.average_cogs)}
+                            {formatPrice(item.display_average_cogs)}
                           </Typography>
                         </CostBreakdownTooltip>
                       ) : (
                         <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
-                          {formatPrice(item.average_cogs)}
+                          {formatPrice(item.display_average_cogs)}
                         </Typography>
                       )}
                     </TableCell>
                     <TableCell align="right">
                       <Typography variant="body2" fontWeight="medium">
-                        {formatPrice(item.total_value)}
+                        {formatPrice(item.display_total_value)}
                       </Typography>
                     </TableCell>
                     <TableCell align="center">

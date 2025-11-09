@@ -17,8 +17,9 @@ export function formatCurrency(value: number | null | undefined, currency: 'IDR'
   if (value === null || value === undefined || isNaN(value)) {
     return currency === 'IDR' ? 'Rp0' : '¥0';
   }
-  
-  const formattedNumber = value.toLocaleString('id-ID');
+  // Round up to avoid decimal fraction with currency display
+  const rounded = Math.ceil(value);
+  const formattedNumber = rounded.toLocaleString('id-ID', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   return currency === 'IDR' ? `Rp${formattedNumber}` : `¥${formattedNumber}`;
 }
 

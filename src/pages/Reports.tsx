@@ -6,10 +6,6 @@ import {
   Grid,
   Card,
   CardContent,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Table,
   TableBody,
   TableCell,
@@ -21,18 +17,18 @@ import {
   Alert,
   Tabs,
   Tab,
-  Button,
-  TextField
+  Button
 } from '@mui/material';
 import {
   TrendingUp as RevenueIcon,
   TrendingDown as ExpenseIcon,
   AccountBalance as ProfitIcon,
-  Inventory as InventoryIcon,
   Assessment as ReportIcon,
   Download as DownloadIcon
 } from '@mui/icons-material';
 import { supabase } from '../lib/supabase';
+import { formatPrice } from '../lib/utils';
+import { getFinancialSummary } from '../lib/financialJournal';
 
 interface FinancialSummary {
   total_revenue: number;
@@ -81,9 +77,7 @@ const Reports: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dateRange, setDateRange] = useState('30');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  // Date range removed: reports now aggregate all-time data
   
   const [financialSummary, setFinancialSummary] = useState<FinancialSummary | null>(null);
   const [profitAnalysis, setProfitAnalysis] = useState<ProfitAnalysis[]>([]);
@@ -92,19 +86,9 @@ const Reports: React.FC = () => {
   const [expensesByCategory, setExpensesByCategory] = useState<ExpenseByCategory[]>([]);
 
   useEffect(() => {
-    // Set default date range
-    const today = new Date();
-    const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-    
-    setEndDate(today.toISOString().split('T')[0]);
-    setStartDate(thirtyDaysAgo.toISOString().split('T')[0]);
+    // Fetch all-time reports once on mount
+    fetchReportData();
   }, []);
-
-  useEffect(() => {
-    if (startDate && endDate) {
-      fetchReportData();
-    }
-  }, [startDate, endDate]);
 
   const fetchReportData = async () => {
     setLoading(true);
@@ -126,20 +110,72 @@ const Reports: React.FC = () => {
 
   const fetchFinancialSummary = async () => {
     try {
-      const { data, error } = await supabase
-        .from('financial_summary')
-        .select('*')
-        .single();
+      // Base revenue/expenses from source tables
+      const [invoicesResult, expensesResult] = await Promise.all([
+        supabase.from('invoices').select('total_revenue'),
+        supabase.from('expenses').select('amount')
+      ]);
 
-      if (error) throw error;
-      setFinancialSummary(data || {
-        total_revenue: 0,
-        total_expenses: 0,
-        total_profit: 0,
-        total_cogs: 0,
-        gross_profit: 0,
-        net_profit: 0
+      if (invoicesResult.error) throw invoicesResult.error;
+      if (expensesResult.error) throw expensesResult.error;
+
+      const baseRevenue = (invoicesResult.data || []).reduce((sum: number, inv: any) => sum + (inv.total_revenue || 0), 0);
+      const baseExpenses = (expensesResult.data || []).reduce((sum: number, exp: any) => sum + (exp.amount || 0), 0);
+
+      // Include ONLY balance adjustments from financial_journal
+      const { data: adjEntries, error: adjError } = await supabase
+        .from('financial_journal')
+        .select('transaction_type, account_type, account_subtype, debit_amount, credit_amount, reference_table, reference_id');
+      if (adjError) throw adjError;
+
+      let adjRevenue = 0;
+      let adjExpenses = 0;
+      adjEntries?.forEach((e: any) => {
+        if (e.transaction_type !== 'adjustment') return;
+        if (e.account_type === 'revenue') {
+          adjRevenue += (e.credit_amount || 0) - (e.debit_amount || 0);
+        } else if (e.account_type === 'expense') {
+          // Refunds reduce expenses (credit), other adjustments increase (debit)
+          const delta = (e.debit_amount || 0) - (e.credit_amount || 0);
+          adjExpenses += delta;
+        }
       });
+
+      // Include any balance_adjustments not yet logged to the journal (backfill)
+      const { data: balAdjustments, error: balAdjError } = await supabase
+        .from('balance_adjustments')
+        .select('id, amount, adjustment_type');
+      if (balAdjError) throw balAdjError;
+
+      const loggedAdjIds = new Set(
+        (adjEntries || [])
+          .filter((e: any) => e.transaction_type === 'adjustment' && e.reference_table === 'balance_adjustments')
+          .map((e: any) => e.reference_id)
+      );
+
+      balAdjustments?.forEach((adj: any) => {
+        if (loggedAdjIds.has(adj.id)) return; // already accounted for in journal
+        if (adj.adjustment_type === 'refund') {
+          // Refund reduces expenses
+          adjExpenses += -(adj.amount || 0);
+        } else if (adj.adjustment_type === 'capital_injection') {
+          // Capital injection increases revenue
+          adjRevenue += (adj.amount || 0);
+        }
+      });
+
+      const total_revenue = baseRevenue + adjRevenue;
+      const total_expenses = baseExpenses + adjExpenses;
+
+      const summary: FinancialSummary = {
+        total_revenue,
+        total_expenses,
+        total_profit: total_revenue,
+        total_cogs: 0,
+        gross_profit: total_revenue,
+        net_profit: total_revenue - total_expenses
+      };
+      setFinancialSummary(summary);
     } catch (err) {
       console.error('Error fetching financial summary:', err);
       setFinancialSummary({
@@ -170,8 +206,7 @@ const Reports: React.FC = () => {
             products!inner(name)
           )
         `)
-        .gte('invoices.sale_date', startDate)
-        .lte('invoices.sale_date', endDate);
+        ;
 
       if (error) throw error;
 
@@ -197,14 +232,15 @@ const Reports: React.FC = () => {
 
         aggregatedData[key].total_quantity_sold += item.quantity;
         aggregatedData[key].total_revenue += item.proportional_revenue;
-        aggregatedData[key].total_cogs += item.cogs_used;
-        aggregatedData[key].gross_profit += item.profit;
+        // Ignore COGS; gross profit equals revenue
+        aggregatedData[key].total_cogs += 0;
+        aggregatedData[key].gross_profit += item.proportional_revenue;
       });
 
       // Calculate profit margins and convert to array
       const profitAnalysisArray = Object.values(aggregatedData).map(item => ({
         ...item,
-        profit_margin: item.total_revenue > 0 ? (item.gross_profit / item.total_revenue) * 100 : 0
+        profit_margin: item.total_revenue > 0 ? 100 : 0
       })).sort((a, b) => b.gross_profit - a.gross_profit);
 
       setProfitAnalysis(profitAnalysisArray);
@@ -235,20 +271,22 @@ const Reports: React.FC = () => {
       // Fetch invoice data grouped by month
       const { data: invoiceData, error: invoiceError } = await supabase
         .from('invoices')
-        .select('sale_date, total_revenue, total_profit')
-        .gte('sale_date', startDate)
-        .lte('sale_date', endDate);
+        .select('sale_date, total_revenue');
 
       if (invoiceError) throw invoiceError;
 
       // Fetch expenses data grouped by month
       const { data: expensesData, error: expensesError } = await supabase
         .from('expenses')
-        .select('expense_date, amount')
-        .gte('expense_date', startDate)
-        .lte('expense_date', endDate);
+        .select('expense_date, amount');
 
       if (expensesError) throw expensesError;
+
+      // Fetch balance adjustments from financial journal
+      const { data: adjustmentData, error: adjError } = await supabase
+        .from('financial_journal')
+        .select('transaction_date, transaction_type, account_type, debit_amount, credit_amount');
+      if (adjError) throw adjError;
 
       // Group data by month
       const monthlyData: { [key: string]: MonthlyTrend } = {};
@@ -259,7 +297,8 @@ const Reports: React.FC = () => {
           monthlyData[month] = { month, revenue: 0, expenses: 0, profit: 0 };
         }
         monthlyData[month].revenue += invoice.total_revenue;
-        monthlyData[month].profit += invoice.total_profit;
+        // Profit equals revenue
+        monthlyData[month].profit += invoice.total_revenue;
       });
 
       expensesData?.forEach(expense => {
@@ -268,6 +307,23 @@ const Reports: React.FC = () => {
           monthlyData[month] = { month, revenue: 0, expenses: 0, profit: 0 };
         }
         monthlyData[month].expenses += expense.amount;
+      });
+
+      // Apply adjustments into monthly revenue/expenses
+      adjustmentData?.forEach(entry => {
+        if (entry.transaction_type !== 'adjustment') return;
+        const month = new Date(entry.transaction_date).toISOString().slice(0, 7);
+        if (!monthlyData[month]) {
+          monthlyData[month] = { month, revenue: 0, expenses: 0, profit: 0 };
+        }
+        if (entry.account_type === 'revenue') {
+          const delta = (entry.credit_amount || 0) - (entry.debit_amount || 0);
+          monthlyData[month].revenue += delta;
+          monthlyData[month].profit += delta;
+        } else if (entry.account_type === 'expense') {
+          const delta = (entry.debit_amount || 0) - (entry.credit_amount || 0);
+          monthlyData[month].expenses += delta;
+        }
       });
 
       const trends = Object.values(monthlyData).sort((a, b) => a.month.localeCompare(b.month));
@@ -286,8 +342,7 @@ const Reports: React.FC = () => {
           amount,
           expense_categories!inner(name)
         `)
-        .gte('expense_date', startDate)
-        .lte('expense_date', endDate);
+        ;
 
       if (error) throw error;
 
@@ -300,6 +355,21 @@ const Reports: React.FC = () => {
         categoryTotals[categoryName] = (categoryTotals[categoryName] || 0) + expense.amount;
         totalExpenses += expense.amount;
       });
+
+      // Include expense-like balance adjustments as a separate category
+      const { data: adjData, error: adjError } = await supabase
+        .from('financial_journal')
+        .select('transaction_type, account_type, debit_amount, credit_amount');
+      if (adjError) throw adjError;
+
+      const adjExpenseTotal = (adjData || [])
+        .filter((e: any) => e.transaction_type === 'adjustment' && e.account_type === 'expense')
+        .reduce((sum: number, e: any) => sum + ((e.debit_amount || 0) - (e.credit_amount || 0)), 0);
+
+      if (adjExpenseTotal !== 0) {
+        categoryTotals['Balance Adjustments'] = (categoryTotals['Balance Adjustments'] || 0) + adjExpenseTotal;
+        totalExpenses += adjExpenseTotal;
+      }
 
       const categoryData = Object.entries(categoryTotals).map(([category_name, total_amount]) => ({
         category_name,
@@ -314,31 +384,7 @@ const Reports: React.FC = () => {
     }
   };
 
-  const handleDateRangeChange = (range: string) => {
-    setDateRange(range);
-    const today = new Date();
-    let startDate: Date;
-
-    switch (range) {
-      case '7':
-        startDate = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-        break;
-      case '30':
-        startDate = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-        break;
-      case '90':
-        startDate = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000);
-        break;
-      case '365':
-        startDate = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000);
-        break;
-      default:
-        return;
-    }
-
-    setStartDate(startDate.toISOString().split('T')[0]);
-    setEndDate(today.toISOString().split('T')[0]);
-  };
+  // Date range handling removed (all-time aggregation)
 
   const getStatusColor = (status: string) => {
     const colors: { [key: string]: 'error' | 'warning' | 'success' } = {
@@ -379,35 +425,6 @@ const Reports: React.FC = () => {
           Financial Reports
         </Typography>
         <Box display="flex" gap={2} alignItems="center">
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>Date Range</InputLabel>
-            <Select
-              value={dateRange}
-              onChange={(e) => handleDateRangeChange(e.target.value)}
-              label="Date Range"
-            >
-              <MenuItem value="7">Last 7 days</MenuItem>
-              <MenuItem value="30">Last 30 days</MenuItem>
-              <MenuItem value="90">Last 90 days</MenuItem>
-              <MenuItem value="365">Last year</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField
-            label="Start Date"
-            type="date"
-            size="small"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
-          <TextField
-            label="End Date"
-            type="date"
-            size="small"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
           <Button
             variant="outlined"
             startIcon={<DownloadIcon />}
@@ -430,7 +447,7 @@ const Reports: React.FC = () => {
                       Total Revenue
                     </Typography>
                     <Typography variant="h5" color="success.main">
-                      ${financialSummary?.total_revenue?.toFixed(2) || '0.00'}
+                      {formatPrice(financialSummary?.total_revenue || 0)}
                     </Typography>
                   </Box>
                   <RevenueIcon color="success" sx={{ fontSize: 40 }} />
@@ -447,7 +464,7 @@ const Reports: React.FC = () => {
                       Total Expenses
                     </Typography>
                     <Typography variant="h5" color="error.main">
-                      ${financialSummary?.total_expenses?.toFixed(2) || '0.00'}
+                      {formatPrice(financialSummary?.total_expenses || 0)}
                     </Typography>
                   </Box>
                   <ExpenseIcon color="error" sx={{ fontSize: 40 }} />
@@ -464,7 +481,7 @@ const Reports: React.FC = () => {
                       Gross Profit
                     </Typography>
                     <Typography variant="h5" color="primary.main">
-                      ${financialSummary?.gross_profit?.toFixed(2) || '0.00'}
+                      {formatPrice(financialSummary?.gross_profit || 0)}
                     </Typography>
                   </Box>
                   <ProfitIcon color="primary" sx={{ fontSize: 40 }} />
@@ -484,7 +501,7 @@ const Reports: React.FC = () => {
                       variant="h5" 
                       color={(financialSummary?.net_profit || 0) >= 0 ? "success.main" : "error.main"}
                     >
-                      ${financialSummary?.net_profit?.toFixed(2) || '0.00'}
+                      {formatPrice(financialSummary?.net_profit || 0)}
                     </Typography>
                   </Box>
                   <ReportIcon color={(financialSummary?.net_profit || 0) >= 0 ? "success" : "error"} sx={{ fontSize: 40 }} />
@@ -545,23 +562,23 @@ const Reports: React.FC = () => {
                       </Typography>
                     </TableCell>
                     <TableCell align="right">
-                      <Typography variant="body2" color="success.main">
-                        ${item.total_revenue.toFixed(2)}
-                      </Typography>
+                    <Typography variant="body2" color="success.main">
+                      {formatPrice(item.total_revenue)}
+                    </Typography>
                     </TableCell>
                     <TableCell align="right">
-                      <Typography variant="body2" color="error.main">
-                        ${item.total_cogs.toFixed(2)}
-                      </Typography>
+                    <Typography variant="body2" color="error.main">
+                      {formatPrice(item.total_cogs)}
+                    </Typography>
                     </TableCell>
                     <TableCell align="right">
-                      <Typography 
-                        variant="body2" 
-                        fontWeight="medium"
-                        color={item.gross_profit >= 0 ? "success.main" : "error.main"}
-                      >
-                        ${item.gross_profit.toFixed(2)}
-                      </Typography>
+                    <Typography 
+                      variant="body2" 
+                      fontWeight="medium"
+                      color={item.gross_profit >= 0 ? "success.main" : "error.main"}
+                    >
+                      {formatPrice(item.gross_profit)}
+                    </Typography>
                     </TableCell>
                     <TableCell align="right">
                       <Chip
@@ -614,12 +631,12 @@ const Reports: React.FC = () => {
                       </TableCell>
                       <TableCell align="right">
                         <Typography variant="body2" color="success.main">
-                          ${trend.revenue.toFixed(2)}
+                          {formatPrice(trend.revenue)}
                         </Typography>
                       </TableCell>
                       <TableCell align="right">
                         <Typography variant="body2" color="error.main">
-                          ${trend.expenses.toFixed(2)}
+                          {formatPrice(trend.expenses)}
                         </Typography>
                       </TableCell>
                       <TableCell align="right">
@@ -628,7 +645,7 @@ const Reports: React.FC = () => {
                           fontWeight="medium"
                           color={netProfit >= 0 ? "success.main" : "error.main"}
                         >
-                          ${netProfit.toFixed(2)}
+                          {formatPrice(netProfit)}
                         </Typography>
                       </TableCell>
                       <TableCell align="right">
@@ -674,7 +691,7 @@ const Reports: React.FC = () => {
                     </TableCell>
                     <TableCell align="right">
                       <Typography variant="body2" color="error.main">
-                        ${category.total_amount.toFixed(2)}
+                        {formatPrice(category.total_amount)}
                       </Typography>
                     </TableCell>
                     <TableCell align="right">

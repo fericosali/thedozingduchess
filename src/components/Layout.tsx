@@ -18,6 +18,8 @@ import {
   Typography,
   useMediaQuery,
   useTheme,
+  InputBase,
+  Paper,
 } from "@mui/material";
 import {
   User as AccountCircle,
@@ -32,6 +34,7 @@ import {
   Settings,
   ShoppingCart,
   TrendingUp,
+  Search,
 } from "lucide-react";
 import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -46,6 +49,7 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [searchQuery, setSearchQuery] = useState("");
   const { user, signOut } = useAuth();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
@@ -304,15 +308,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         sx={{
           width: { md: `calc(100% - ${drawerWidth}px)` },
           ml: { md: `${drawerWidth}px` },
-          background: "rgba(255, 255, 255, 0.98)",
-          backdropFilter: "blur(24px)",
+          background:
+            "linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,255,255,0.85))",
+          backdropFilter: "blur(28px)",
           borderBottom: "1px solid rgba(0, 0, 0, 0.06)",
           color: "text.primary",
-          boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
+          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.06)",
         }}
       >
-        <Toolbar 
-          sx={{ 
+        <Toolbar
+          sx={{
             justifyContent: "space-between",
             minHeight: { xs: 64, sm: 70 },
             px: { xs: 2, sm: 3 },
@@ -343,6 +348,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                   WebkitTextFillColor: "transparent",
                   fontSize: { xs: "1.25rem", sm: "1.5rem" },
                   lineHeight: 1.2,
+                  letterSpacing: 0.2,
                 }}
               >
                 {getCurrentPageTitle()}
@@ -350,10 +356,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               <Typography
                 variant="caption"
                 color="text.secondary"
-                sx={{ 
+                sx={{
                   fontWeight: 500,
                   fontSize: "0.75rem",
-                  opacity: 0.8,
+                  opacity: 0.85,
                   display: { xs: "none", sm: "block" },
                 }}
               >
@@ -362,7 +368,36 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </Box>
           </Box>
 
-          <Box sx={{ display: "flex", alignItems: "center" }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            {!isMobile && (
+              <Paper
+                component="form"
+                onSubmit={(e: React.FormEvent) => e.preventDefault()}
+                sx={{
+                  p: "2px 8px",
+                  display: "flex",
+                  alignItems: "center",
+                  borderRadius: 999,
+                  bgcolor: "rgba(255,255,255,0.6)",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+                  border: "1px solid rgba(0,0,0,0.06)",
+                  backdropFilter: "blur(12px)",
+                  minWidth: 220,
+                }}
+              >
+                <IconButton sx={{ mr: 0.5 }} size="small">
+                  <Search size={18} />
+                </IconButton>
+                <InputBase
+                  sx={{ ml: 1, flex: 1, fontSize: "0.9rem" }}
+                  placeholder="Search…"
+                  inputProps={{ "aria-label": "search" }}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </Paper>
+            )}
+
             <IconButton
               size="large"
               edge="end"

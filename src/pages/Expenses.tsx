@@ -39,7 +39,7 @@ import {
   Delete as DeleteIcon
 } from '@mui/icons-material';
 import { supabase } from '../lib/supabase';
-import { logExpenseTransaction } from '../lib/financialJournal';
+import { logExpenseTransaction, logBalanceAdjustmentTransaction } from '../lib/financialJournal';
 import { formatPrice, formatNumber } from '../lib/utils';
 
 interface Expense {
@@ -110,8 +110,10 @@ const Expenses: React.FC = () => {
   const [newCategoryDescription, setNewCategoryDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // Date filters removed: show all records
 
   useEffect(() => {
+    // Load all-time data once on mount
     fetchExpenses();
     fetchCategories();
     fetchBalanceAdjustments();
@@ -227,9 +229,11 @@ const Expenses: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase
+      const { data: insertedAdj, error } = await supabase
         .from('balance_adjustments')
-        .insert([newBalanceAdjustment]);
+        .insert([newBalanceAdjustment])
+        .select()
+        .single();
 
       if (error) throw error;
 
@@ -242,6 +246,18 @@ const Expenses: React.FC = () => {
         description: '',
         adjustment_date: new Date().toISOString().split('T')[0]
       });
+      // Log into financial journal
+      try {
+        await logBalanceAdjustmentTransaction(
+          insertedAdj.id,
+          insertedAdj.amount,
+          insertedAdj.adjustment_type,
+          insertedAdj.reason,
+          'IDR'
+        );
+      } catch (logError) {
+        console.warn('Failed to log balance adjustment:', logError);
+      }
       fetchBalanceAdjustments();
     } catch (err) {
       setError('Failed to record balance adjustment');
@@ -328,7 +344,7 @@ const Expenses: React.FC = () => {
         <Typography variant="h4" component="h1">
           Expense Management
         </Typography>
-        <Box display="flex" gap={1}>
+        <Box display="flex" gap={2} alignItems="center">
           <Button
             variant="outlined"
             startIcon={<CategoryIcon />}

@@ -55,7 +55,7 @@ export const CostBreakdownTooltip: React.FC<CostBreakdownTooltipProps> = ({
                 ml: { xs: 0, sm: 2 },
                 fontSize: 'inherit'
               }}>
-                {formatPrice(Math.round(basePrice))}
+                {formatPrice(basePrice)}
               </Typography>
             </Box>
 
@@ -76,7 +76,7 @@ export const CostBreakdownTooltip: React.FC<CostBreakdownTooltipProps> = ({
                 ml: { xs: 0, sm: 2 },
                 fontSize: 'inherit'
               }}>
-                {gapPerUnit >= 0 ? '+' : ''}{formatPrice(Math.round(gapPerUnit))}
+                {gapPerUnit >= 0 ? '+' : ''}{formatPrice(gapPerUnit)}
               </Typography>
             </Box>
 
@@ -97,7 +97,7 @@ export const CostBreakdownTooltip: React.FC<CostBreakdownTooltipProps> = ({
                 ml: { xs: 0, sm: 2 },
                 fontSize: 'inherit'
               }}>
-                +{formatPrice(Math.round(logisticsFeePerUnit))}
+                +{formatPrice(logisticsFeePerUnit)}
               </Typography>
             </Box>
 
@@ -120,7 +120,7 @@ export const CostBreakdownTooltip: React.FC<CostBreakdownTooltipProps> = ({
                 ml: { xs: 0, sm: 2 },
                 fontSize: 'inherit'
               }}>
-                {formatPrice(Math.round(finalUnitCost))}
+                {formatPrice(finalUnitCost)}
               </Typography>
             </Box>
           </Box>
