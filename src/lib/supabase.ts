@@ -165,7 +165,6 @@ export type Database = {
           total_quantity: number
           average_cogs: number
           total_value: number
-          low_stock_threshold: number
           last_updated: string
         }
         Insert: {
@@ -173,7 +172,6 @@ export type Database = {
           variant_id: string
           total_quantity?: number
           average_cogs?: number
-          low_stock_threshold?: number
           last_updated?: string
         }
         Update: {
@@ -181,7 +179,6 @@ export type Database = {
           variant_id?: string
           total_quantity?: number
           average_cogs?: number
-          low_stock_threshold?: number
           last_updated?: string
         }
       }

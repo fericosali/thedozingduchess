@@ -46,17 +46,6 @@ interface ProfitAnalysis {
   average_price: number;
 }
 
-interface InventoryAlert {
-  product_name: string;
-  variant: string;
-  size: string;
-  sku: string;
-  total_quantity: number;
-  low_stock_threshold: number;
-  is_low_stock: boolean;
-  available_stock: number;
-}
-
 interface MonthlyTrend {
   month: string;
   revenue: number;
@@ -79,7 +68,6 @@ const Reports: React.FC = () => {
   const [financialSummary, setFinancialSummary] =
     useState<FinancialSummary | null>(null);
   const [profitAnalysis, setProfitAnalysis] = useState<ProfitAnalysis[]>([]);
-  const [inventoryAlerts, setInventoryAlerts] = useState<InventoryAlert[]>([]);
   const [monthlyTrends, setMonthlyTrends] = useState<MonthlyTrend[]>([]);
   const [expensesByCategory, setExpensesByCategory] = useState<
     ExpenseByCategory[]
@@ -96,7 +84,6 @@ const Reports: React.FC = () => {
       await Promise.all([
         fetchFinancialSummary(),
         fetchProfitAnalysis(),
-        fetchInventoryAlerts(),
         fetchMonthlyTrends(),
         fetchExpensesByCategory(),
       ]);
@@ -255,22 +242,6 @@ const Reports: React.FC = () => {
     } catch (err) {
       console.error("Error fetching profit analysis:", err);
       setProfitAnalysis([]);
-    }
-  };
-
-  const fetchInventoryAlerts = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("inventory_with_alerts")
-        .select("*")
-        .eq("is_low_stock", true)
-        .order("total_quantity", { ascending: true });
-
-      if (error) throw error;
-      setInventoryAlerts(data || []);
-    } catch (err) {
-      console.error("Error fetching inventory alerts:", err);
-      setInventoryAlerts([]);
     }
   };
 
@@ -597,7 +568,6 @@ const Reports: React.FC = () => {
           <Tab label="Profit Analysis" />
           <Tab label="Monthly Trends" />
           <Tab label="Expense Breakdown" />
-          <Tab label="Inventory Alerts" />
         </Tabs>
       </Box>
 
@@ -776,59 +746,6 @@ const Reports: React.FC = () => {
                         variant="outlined"
                         size="small"
                       />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
-      )}
-
-      {/* Inventory Alerts Tab */}
-      {tabValue === 3 && (
-        <Paper>
-          <Box p={2}>
-            <Typography variant="h6" gutterBottom>
-              Inventory Alerts
-            </Typography>
-          </Box>
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Product</TableCell>
-                  <TableCell>Variant</TableCell>
-                  <TableCell align="right">Current Stock</TableCell>
-                  <TableCell align="right">Threshold</TableCell>
-                  <TableCell align="center">Status</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {inventoryAlerts.map((alert, index) => (
-                  <TableRow key={index}>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
-                        {alert.product_name}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {alert.variant} - {alert.size}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography variant="body2">
-                        {alert.total_quantity}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">
-                      <Typography variant="body2">
-                        {alert.low_stock_threshold}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="center">
-                      <Chip label="Low Stock" color="warning" size="small" />
                     </TableCell>
                   </TableRow>
                 ))}
