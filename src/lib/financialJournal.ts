@@ -157,14 +157,14 @@ export async function logBalanceAdjustmentTransaction(
   // Refunds should reduce expenses, not inflate revenue
   const isRefund = adjustmentType === 'refund';
   const isIncome = amount >= 0;
-  const payload = {
-    transaction_type: 'adjustment' as const,
+  let payload: JournalEntry = {
+    transaction_type: 'adjustment',
     description: `Balance adjustment (${adjustmentType}): ${reason}`,
     reference_id: adjustmentId,
     reference_table: 'balance_adjustments',
     debit_amount: 0,
     credit_amount: 0,
-    account_type: 'expense' as const,
+    account_type: 'expense',
     account_subtype: adjustmentType,
     currency
   };
@@ -178,11 +178,19 @@ export async function logBalanceAdjustmentTransaction(
   } else {
     // Other adjustments: positive as revenue credit, negative as expense debit
     if (isIncome) {
-      payload.account_type = 'revenue';
-      payload.credit_amount = amount;
+      payload = {
+        ...payload,
+        account_type: 'revenue',
+        debit_amount: 0,
+        credit_amount: amount
+      };
     } else {
-      payload.account_type = 'expense';
-      payload.debit_amount = Math.abs(amount);
+      payload = {
+        ...payload,
+        account_type: 'expense',
+        debit_amount: Math.abs(amount),
+        credit_amount: 0
+      };
     }
   }
 
