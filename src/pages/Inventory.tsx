@@ -1,4 +1,5 @@
 import {
+  Edit as EditIcon,
   Inventory as InventoryIcon,
   TrendingDown as TrendingDownIcon,
   TrendingUp as TrendingUpIcon,
@@ -7,11 +8,18 @@ import {
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardContent,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Grid,
+  IconButton,
+  MenuItem,
   Paper,
   Table,
   TableBody,
@@ -19,6 +27,8 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import React, { useEffect, useState } from "react";
@@ -52,9 +62,19 @@ interface InventoryItem {
 
 const Inventory: React.FC = () => {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [totalPurchasedQty, setTotalPurchasedQty] = useState(0);
+  const [totalAvailableQty, setTotalAvailableQty] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Stock Adjustment State
+  const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
+  const [adjustmentQuantity, setAdjustmentQuantity] = useState(1);
+  const [adjustmentReason, setAdjustmentReason] = useState("Defect");
+  const [adjustmentNotes, setAdjustmentNotes] = useState("");
+  const [adjusting, setAdjusting] = useState(false);
 
   useEffect(() => {
     fetchInventory();
@@ -95,10 +115,24 @@ const Inventory: React.FC = () => {
           logistics_fee_per_unit,
           gap_per_unit,
           remaining_quantity,
+          quantity,
           purchase_orders(exchange_rate)
         `);
 
       if (batchesError) throw batchesError;
+
+      // Calculate global totals from batches
+      const totalPurchased =
+        batchesData?.reduce((sum, batch) => sum + (batch.quantity || 0), 0) ||
+        0;
+      const totalAvailable =
+        batchesData?.reduce(
+          (sum, batch) => sum + (batch.remaining_quantity || 0),
+          0
+        ) || 0;
+
+      setTotalPurchasedQty(totalPurchased);
+      setTotalAvailableQty(totalAvailable);
 
       // Join inventory data with purchase batches by variant_id
       const processedData =
@@ -243,6 +277,38 @@ const Inventory: React.FC = () => {
     }
   };
 
+  const handleAdjustment = async () => {
+    if (!selectedItem || adjustmentQuantity <= 0) return;
+
+    try {
+      setAdjusting(true);
+
+      const { error } = await supabase.rpc("handle_manual_adjustment", {
+        p_variant_id: selectedItem.variant_id,
+        p_quantity: adjustmentQuantity,
+        p_reason: `${adjustmentReason}: ${adjustmentNotes}`,
+      });
+
+      if (error) throw error;
+
+      setSuccess(`Successfully adjusted stock for ${selectedItem.sku}`);
+      setAdjustmentDialogOpen(false);
+      fetchInventory(); // Refresh data
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to adjust stock");
+    } finally {
+      setAdjusting(false);
+    }
+  };
+
+  const openAdjustmentDialog = (item: InventoryItem) => {
+    setSelectedItem(item);
+    setAdjustmentQuantity(1);
+    setAdjustmentReason("Defect");
+    setAdjustmentNotes("");
+    setAdjustmentDialogOpen(true);
+  };
+
   const getStockStatus = (item: InventoryItem) => {
     if (item.total_quantity === 0) {
       return {
@@ -336,13 +402,21 @@ const Inventory: React.FC = () => {
               >
                 <Box>
                   <Typography color="textSecondary" gutterBottom>
-                    Out of Stock
+                    Stock Status
                   </Typography>
-                  <Typography variant="h5" color="error.main">
-                    {formatNumber(outOfStockItems.length)}
+                  <Box display="flex" alignItems="baseline" gap={1}>
+                    <Typography variant="h5" color="primary.main">
+                      {formatNumber(totalAvailableQty)}
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      / {formatNumber(totalPurchasedQty)}
+                    </Typography>
+                  </Box>
+                  <Typography variant="caption" color="textSecondary">
+                    Available / Total Purchased
                   </Typography>
                 </Box>
-                <TrendingDownIcon color="error" sx={{ fontSize: 40 }} />
+                <TrendingDownIcon color="info" sx={{ fontSize: 40 }} />
               </Box>
             </CardContent>
           </Card>
@@ -382,6 +456,7 @@ const Inventory: React.FC = () => {
                 <TableCell align="right">Avg COGS (IDR)</TableCell>
                 <TableCell align="right">Total Value (IDR)</TableCell>
                 <TableCell align="center">Status</TableCell>
+                <TableCell align="center">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -460,6 +535,17 @@ const Inventory: React.FC = () => {
                         size="small"
                       />
                     </TableCell>
+                    <TableCell align="center">
+                      <Tooltip title="Adjust Stock (Defect/Loss)">
+                        <IconButton
+                          size="small"
+                          onClick={() => openAdjustmentDialog(item)}
+                          disabled={item.total_quantity === 0}
+                        >
+                          <EditIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -467,6 +553,83 @@ const Inventory: React.FC = () => {
           </Table>
         </TableContainer>
       </Paper>
+
+      {/* Stock Adjustment Dialog */}
+      <Dialog
+        open={adjustmentDialogOpen}
+        onClose={() => !adjusting && setAdjustmentDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Adjust Stock Level</DialogTitle>
+        <DialogContent>
+          <Box mt={2} display="flex" flexDirection="column" gap={3}>
+            <Alert severity="info">
+              Removing items via this form will{" "}
+              <strong>preserve total inventory value</strong>, which will{" "}
+              <strong>increase the average COGS</strong> of the remaining items.
+              Use this for defects, lost items, or damages.
+            </Alert>
+
+            <Typography variant="subtitle2">
+              Product: {selectedItem?.product_name} ({selectedItem?.sku})
+            </Typography>
+
+            <TextField
+              label="Quantity to Remove"
+              type="number"
+              value={adjustmentQuantity}
+              onChange={(e) =>
+                setAdjustmentQuantity(parseInt(e.target.value) || 0)
+              }
+              fullWidth
+              inputProps={{ min: 1, max: selectedItem?.total_quantity }}
+              helperText={`Available: ${selectedItem?.total_quantity}`}
+            />
+
+            <TextField
+              select
+              label="Reason"
+              value={adjustmentReason}
+              onChange={(e) => setAdjustmentReason(e.target.value)}
+              fullWidth
+            >
+              <MenuItem value="Defect">Defect</MenuItem>
+              <MenuItem value="Lost">Lost / Missing</MenuItem>
+              <MenuItem value="Damage">Damage</MenuItem>
+              <MenuItem value="Other">Other</MenuItem>
+            </TextField>
+
+            <TextField
+              label="Notes"
+              value={adjustmentNotes}
+              onChange={(e) => setAdjustmentNotes(e.target.value)}
+              fullWidth
+              multiline
+              rows={2}
+              placeholder="Optional details..."
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setAdjustmentDialogOpen(false)}
+            disabled={adjusting}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAdjustment}
+            variant="contained"
+            color="warning"
+            disabled={
+              adjusting || !adjustmentQuantity || adjustmentQuantity <= 0
+            }
+          >
+            {adjusting ? "Adjusting..." : "Confirm Adjustment"}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
