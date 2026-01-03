@@ -1,5 +1,6 @@
 import {
   Edit as EditIcon,
+  History as HistoryIcon,
   Inventory as InventoryIcon,
   TrendingDown as TrendingDownIcon,
   TrendingUp as TrendingUpIcon,
@@ -60,6 +61,16 @@ interface InventoryItem {
   display_total_value: number;
 }
 
+interface SaleHistoryItem {
+  id: string;
+  invoice_number: string;
+  marketplace: string;
+  quantity: number;
+  selling_price: number;
+  total_revenue: number;
+  sale_date: string;
+}
+
 const Inventory: React.FC = () => {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [totalPurchasedQty, setTotalPurchasedQty] = useState(0);
@@ -75,6 +86,11 @@ const Inventory: React.FC = () => {
   const [adjustmentReason, setAdjustmentReason] = useState("Defect");
   const [adjustmentNotes, setAdjustmentNotes] = useState("");
   const [adjusting, setAdjusting] = useState(false);
+
+  // Sales History State
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [salesHistory, setSalesHistory] = useState<SaleHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     fetchInventory();
@@ -309,6 +325,48 @@ const Inventory: React.FC = () => {
     setAdjustmentDialogOpen(true);
   };
 
+  const openHistoryDialog = async (item: InventoryItem) => {
+    setSelectedItem(item);
+    setHistoryDialogOpen(true);
+    setHistoryLoading(true);
+    setSalesHistory([]);
+
+    try {
+      // Query the invoice_details view which joins invoices and invoice_items
+      const { data, error } = await supabase
+        .from("invoice_details")
+        .select("*")
+        .eq("variant_id", item.variant_id)
+        .order("sale_date", { ascending: false });
+
+      if (error) throw error;
+
+      // Map the view data to our SaleHistoryItem interface
+      const historyItems: SaleHistoryItem[] = (data || []).map(
+        (record: any) => ({
+          id: record.item_id, // Use item_id from view
+          invoice_number: record.invoice_number,
+          marketplace: record.marketplace,
+          quantity: record.quantity,
+          // Calculate unit selling price from proportional revenue
+          selling_price:
+            record.quantity > 0
+              ? record.proportional_revenue / record.quantity
+              : 0,
+          total_revenue: record.proportional_revenue,
+          sale_date: record.sale_date,
+        })
+      );
+
+      setSalesHistory(historyItems);
+    } catch (err) {
+      console.error("Error fetching sales history:", err);
+      setError("Failed to fetch sales history");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const getStockStatus = (item: InventoryItem) => {
     if (item.total_quantity === 0) {
       return {
@@ -536,6 +594,15 @@ const Inventory: React.FC = () => {
                       />
                     </TableCell>
                     <TableCell align="center">
+                      <Tooltip title="Sales History">
+                        <IconButton
+                          size="small"
+                          onClick={() => openHistoryDialog(item)}
+                          color="primary"
+                        >
+                          <HistoryIcon />
+                        </IconButton>
+                      </Tooltip>
                       <Tooltip title="Adjust Stock (Defect/Loss)">
                         <IconButton
                           size="small"
@@ -628,6 +695,83 @@ const Inventory: React.FC = () => {
           >
             {adjusting ? "Adjusting..." : "Confirm Adjustment"}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Sales History Dialog */}
+      <Dialog
+        open={historyDialogOpen}
+        onClose={() => setHistoryDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          Sales History: {selectedItem?.product_name} ({selectedItem?.sku})
+        </DialogTitle>
+        <DialogContent>
+          {historyLoading ? (
+            <Box
+              display="flex"
+              justifyContent="center"
+              alignItems="center"
+              minHeight="200px"
+            >
+              <CircularProgress />
+            </Box>
+          ) : salesHistory.length === 0 ? (
+            <Box
+              display="flex"
+              justifyContent="center"
+              alignItems="center"
+              minHeight="200px"
+            >
+              <Typography color="textSecondary">
+                No sales history found
+              </Typography>
+            </Box>
+          ) : (
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell>Invoice #</TableCell>
+                    <TableCell>Marketplace</TableCell>
+                    <TableCell align="right">Qty</TableCell>
+                    <TableCell align="right">Selling Price</TableCell>
+                    <TableCell align="right">Revenue</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {salesHistory.map((sale) => (
+                    <TableRow key={sale.id}>
+                      <TableCell>
+                        {new Date(sale.sale_date).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>{sale.invoice_number}</TableCell>
+                      <TableCell>
+                        <Chip
+                          label={sale.marketplace}
+                          size="small"
+                          variant="outlined"
+                        />
+                      </TableCell>
+                      <TableCell align="right">{sale.quantity}</TableCell>
+                      <TableCell align="right">
+                        {formatPrice(sale.selling_price)}
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatPrice(sale.total_revenue)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setHistoryDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Box>

@@ -1,6 +1,7 @@
 import {
   AttachMoney as MoneyIcon,
   Receipt as ReceiptIcon,
+  Undo as RevertIcon,
   ShoppingCart as SalesIcon,
   TrendingUp as TrendingUpIcon,
   Visibility as ViewIcon,
@@ -294,6 +295,34 @@ const Sales: React.FC = () => {
   const removeItemFromInvoice = (index: number) => {
     const updatedItems = invoiceItems.filter((_, i) => i !== index);
     setInvoiceItems(updatedItems);
+  };
+
+  const handleRevertInvoice = async (invoiceNumber: string) => {
+    if (
+      !window.confirm(
+        `Are you sure you want to revert invoice ${invoiceNumber}? This will restore stock and delete the invoice record. This action cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const { error } = await supabase.rpc("revert_invoice", {
+        p_invoice_number: invoiceNumber,
+      });
+
+      if (error) throw error;
+
+      setSuccess(`Invoice ${invoiceNumber} reverted successfully`);
+      fetchSales();
+      fetchVariants();
+    } catch (err) {
+      console.error("Error reverting invoice:", err);
+      setError("Failed to revert invoice");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCreateInvoice = async () => {
@@ -669,6 +698,17 @@ const Sales: React.FC = () => {
                         onClick={() => openInvoiceDialog(invoice)}
                       >
                         <ViewIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Revert Invoice">
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() =>
+                          handleRevertInvoice(invoice.invoice_number)
+                        }
+                      >
+                        <RevertIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
                   </TableCell>
