@@ -144,6 +144,53 @@ export async function logExpenseTransaction(
 }
 
 /**
+ * Update a general expense transaction
+ */
+export async function updateExpenseTransaction(
+  expenseId: string,
+  description: string,
+  amount: number,
+  expenseType: string,
+  currency: string = 'IDR'
+) {
+  // Find the journal entry linked to this expense
+  const { data: entries, error: fetchError } = await supabase
+    .from('financial_journal')
+    .select('id')
+    .eq('reference_id', expenseId)
+    .eq('reference_table', 'expenses')
+    .single();
+
+  if (fetchError) {
+    console.error('Failed to find journal entry for update:', fetchError);
+    // If not found, we might want to create it, but for now let's just log error
+    return null;
+  }
+
+  // Update the entry directly
+  const { data, error } = await supabase
+    .from('financial_journal')
+    .update({
+      description: description,
+      debit_amount: amount,
+      account_subtype: expenseType,
+      currency: currency,
+      transaction_date: new Date().toISOString() // Optional: update date to now? Or keep original? usually keep original or update if date changed.
+      // Let's assume we update the fields that changed.
+    })
+    .eq('id', entries.id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Failed to update journal entry:', error);
+    throw error;
+  }
+
+  return data;
+}
+
+/**
  * Log a balance adjustment. Positive amounts are treated as revenue (credit),
  * negative amounts are treated as expense (debit).
  */

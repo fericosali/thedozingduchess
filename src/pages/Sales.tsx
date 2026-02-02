@@ -149,7 +149,7 @@ const Sales: React.FC = () => {
       const { data, error } = await supabase
         .from("invoice_details")
         .select("*")
-        .order("sale_date", { ascending: false });
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
 
@@ -222,7 +222,7 @@ const Sales: React.FC = () => {
           sku,
           products!inner(name),
           inventory(total_quantity)
-        `
+        `,
         )
         .eq("is_active", true);
 
@@ -232,8 +232,8 @@ const Sales: React.FC = () => {
         data?.map((v) => {
           const inv = (v as any).inventory;
           const qty = Array.isArray(inv)
-            ? inv?.[0]?.total_quantity ?? 0
-            : inv?.total_quantity ?? 0;
+            ? (inv?.[0]?.total_quantity ?? 0)
+            : (inv?.total_quantity ?? 0);
           return {
             id: v.id,
             product_name: (v.products as any).name,
@@ -266,7 +266,7 @@ const Sales: React.FC = () => {
 
     // Check if item already exists in invoice
     const existingItemIndex = invoiceItems.findIndex(
-      (item) => item.variant_id === currentItem.variant_id
+      (item) => item.variant_id === currentItem.variant_id,
     );
     if (existingItemIndex >= 0) {
       const updatedItems = [...invoiceItems];
@@ -300,7 +300,7 @@ const Sales: React.FC = () => {
   const handleRevertInvoice = async (invoiceNumber: string) => {
     if (
       !window.confirm(
-        `Are you sure you want to revert invoice ${invoiceNumber}? This will restore stock and delete the invoice record. This action cannot be undone.`
+        `Are you sure you want to revert invoice ${invoiceNumber}? This will restore stock and delete the invoice record. This action cannot be undone.`,
       )
     ) {
       return;
@@ -347,7 +347,7 @@ const Sales: React.FC = () => {
       // Calculate total quantity for profit distribution
       const totalQuantity = invoiceItems.reduce(
         (sum, item) => sum + item.quantity,
-        0
+        0,
       );
 
       // Create invoice header
@@ -393,7 +393,7 @@ const Sales: React.FC = () => {
           newInvoice.marketplace,
           totalAmount,
           "IDR",
-          "invoices"
+          "invoices",
         );
 
         // Skip COGS logging; purchases are recorded as expenses
@@ -484,7 +484,7 @@ const Sales: React.FC = () => {
       acc[inv.marketplace] = (acc[inv.marketplace] || 0) + 1;
       return acc;
     },
-    {} as Record<string, number>
+    {} as Record<string, number>,
   );
   const topMarketplaceName =
     Object.entries(marketplaceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ||
@@ -784,7 +784,7 @@ const Sales: React.FC = () => {
                     <ListItemText
                       primary={`${item.product_name} — ${item.variant} (${item.size})`}
                       secondary={`SKU: ${item.sku} | Qty: ${formatQuantity(
-                        item.quantity
+                        item.quantity,
                       )} | Revenue: ${formatPrice(item.total_revenue)}`}
                     />
                   </ListItem>
